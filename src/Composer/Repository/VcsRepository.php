@@ -47,6 +47,7 @@ class VcsRepository extends ArrayRepository
             'svn'           => 'Composer\Repository\Vcs\SvnDriver',
             'hg-bitbucket'  => 'Composer\Repository\Vcs\HgBitbucketDriver',
             'hg'            => 'Composer\Repository\Vcs\HgDriver',
+            'bzr'           => 'Composer\Repository\Vcs\BzrDriver',
         );
 
         $this->url = $repoConfig['url'];
