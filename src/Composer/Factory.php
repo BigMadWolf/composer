@@ -313,6 +313,7 @@ class Factory
         $dm->setDownloader('tar', new Downloader\TarDownloader($io, $config, $cache));
         $dm->setDownloader('phar', new Downloader\PharDownloader($io, $config, $cache));
         $dm->setDownloader('file', new Downloader\FileDownloader($io, $config, $cache));
+        $dm->setDownloader('bzr', new Downloader\BzrDownloader($io, $config, $cache));
 
         return $dm;
     }
