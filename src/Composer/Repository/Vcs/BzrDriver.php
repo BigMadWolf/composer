@@ -111,7 +111,6 @@ class BzrDriver extends VcsDriver
             }
 
             $composer = JsonFile::parseJson($output, $this->baseUrl . $resource . $rev);
-
             if (!isset($composer['time'])) {
                 $output = $this->execute('bzr info', $this->baseUrl . $path . $rev);
                 foreach ($this->process->splitLines($output) as $line) {
@@ -229,7 +228,8 @@ class BzrDriver extends VcsDriver
     protected function execute($command, $url)
     {
         try {
-            return $this->process->execute("$command $url");
+            $this->process->execute("$command $url", $output);
+            return $output;
         } catch (\RuntimeException $e) {
             if (0 !== $this->process->execute('bzr --version', $ignoredOutput)) {
                 throw new \RuntimeException('Failed to load '.$this->url.', bzr was not found, check that it is installed and in your PATH env.' . "\n\n" . $this->process->getErrorOutput());
