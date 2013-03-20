@@ -280,6 +280,7 @@ class Factory
         $rm->setRepositoryClass('git', 'Composer\Repository\VcsRepository');
         $rm->setRepositoryClass('svn', 'Composer\Repository\VcsRepository');
         $rm->setRepositoryClass('hg', 'Composer\Repository\VcsRepository');
+        $rm->setRepositoryClass('bzr', 'Composer\Repository\VcsRepository');
 
         return $rm;
     }
