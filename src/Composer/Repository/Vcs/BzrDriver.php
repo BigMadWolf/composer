@@ -20,31 +20,23 @@ use Composer\IO\IOInterface;
 use Composer\Downloader\TransportException;
 
 /**
- *
+ * @author Jérémy Subtil <jeremy.subtil@gmail.com>
  */
 class BzrDriver extends VcsDriver
 {
     protected $tags;
-    protected $branches;
-    protected $rootIdentifier;
-    protected $repoDir;
+    protected $rootIdentifier = 'default';
+    protected $cache;
     protected $infoCache = array();
-
-
-    protected $trunkPath    = false;
-    protected $tagsPath     = false; //'tags';
-
 
     /**
      * {@inheritDoc}
      */
     public function initialize()
     {
-        $this->url = rtrim($this->url, '/');
-        $this->rootIdentifier = substr($this->url, strrpos($this->url, '/') + 1);
-        $this->branches = array($this->rootIdentifier => $this->rootIdentifier);
-        $this->url = $this->baseUrl = substr($this->url, 0, strrpos($this->url, '/'));
-        $this->cache = new Cache($this->io, $this->config->get('cache-repo-dir').'/'.preg_replace('{[^a-z0-9.]}i', '-', $this->baseUrl));
+        $this->url = rtrim(self::normalizeUrl($this->url), '/');
+        $this->cache = new Cache($this->io, $this->config->get('cache-repo-dir').'/'.preg_replace('{[^a-z0-9.]}i', '-', $this->url));
+
         $this->getTags();
     }
 
@@ -53,7 +45,7 @@ class BzrDriver extends VcsDriver
      */
     public function getRootIdentifier()
     {
-        return $this->rootIdentifier ?: $this->trunkPath;
+        return $this->rootIdentifier;
     }
 
     /**
@@ -69,7 +61,7 @@ class BzrDriver extends VcsDriver
      */
     public function getSource($identifier)
     {
-        return array('type' => 'bzr', 'url' => $this->baseUrl, 'reference' => $identifier);
+        return array('type' => 'bzr', 'url' => $this->url, 'reference' => $identifier);
     }
 
     /**
@@ -85,24 +77,15 @@ class BzrDriver extends VcsDriver
      */
     public function getComposerInformation($identifier)
     {
-
-        $identifier = '/' . trim($identifier, '/') . '/';
         if ($res = $this->cache->read($identifier.'.json')) {
             $this->infoCache[$identifier] = JsonFile::parseJson($res);
         }
 
+        $file = $this->url . '/composer.json';
+
         if (!isset($this->infoCache[$identifier])) {
-            preg_match('{^(.+?)(@\d+)?/$}', $identifier, $match);
-            if (!empty($match[2])) {
-                $path = $match[1];
-                $rev = $match[2];
-            } else {
-                $path = $identifier;
-                $rev = '';
-            }
             try {
-                $resource = $path . 'composer.json';
-                $output = $this->execute('bzr cat', $this->baseUrl . $resource . $rev);
+                $output = $this->execute('bzr cat', $file);
                 if (!trim($output)) {
                     return;
                 }
@@ -110,11 +93,12 @@ class BzrDriver extends VcsDriver
                 throw new TransportException($e->getMessage());
             }
 
-            $composer = JsonFile::parseJson($output, $this->baseUrl . $resource . $rev);
+            $composer = JsonFile::parseJson($output, $file);
+
             if (!isset($composer['time'])) {
-                $output = $this->execute('bzr info', $this->baseUrl . $path . $rev);
+                $output = $this->execute('bzr log --revision=-1 ', $this->url);
                 foreach ($this->process->splitLines($output) as $line) {
-                    if ($line && preg_match('{^Last Changed Date: ([^(]+)}', $line, $match)) {
+                    if ($line && preg_match('{^timestamp: (.+)$}', $line, $match)) {
                         $date = new \DateTime($match[1], new \DateTimeZone('UTC'));
                         $composer['time'] = $date->format('Y-m-d H:i:s');
                         break;
@@ -125,6 +109,7 @@ class BzrDriver extends VcsDriver
             $this->cache->write($identifier.'.json', json_encode($composer));
             $this->infoCache[$identifier] = $composer;
         }
+
         return $this->infoCache[$identifier];
     }
 
@@ -136,18 +121,12 @@ class BzrDriver extends VcsDriver
         if (null === $this->tags) {
             $this->tags = array();
 
-            if ($this->tagsPath !== false) {
-                $output = $this->execute('bzr tags -d ', $this->baseUrl . '/' . $this->tagsPath);
-                if ($output) {
-                    foreach ($this->process->splitLines($output) as $line) {
-                        $line = trim($line);
-                        if ($line && preg_match('{^\s*(\S+).*?(\S+)\s*$}', $line, $match)) {
-                            if (isset($match[1]) && isset($match[2]) && $match[2] !== './') {
-                                $this->tags[rtrim($match[2], '/')] = '/' . $this->tagsPath .
-                                    '/' . $match[2] . '@' . $match[1];
-                            }
-                        }
-                    }
+            $output = $this->execute('bzr tags --directory=', $this->url);
+
+            foreach ($this->process->splitLines($output) as $line) {
+                if (preg_match('{^([^\s]+)}', $line, $matches)) {
+                    $tag = $matches[1];
+                    $this->tags[$tag] = $tag;
                 }
             }
         }
@@ -160,7 +139,8 @@ class BzrDriver extends VcsDriver
      */
     public function getBranches()
     {
-        return $this->branches;
+        // no branches support for Bazaar
+        return array($this->rootIdentifier => $this->rootIdentifier);
     }
 
     /**
@@ -169,7 +149,7 @@ class BzrDriver extends VcsDriver
     public static function supports(IOInterface $io, $url, $deep = false)
     {
         $url = self::normalizeUrl($url);
-        if (preg_match('#(^http://|^bzr\+ssh://|bzr\.)#i', $url)) {
+        if (preg_match('#(^https?://|^bzr(?:\+ssh)?://)#i', $url)) {
             return true;
         }
 
@@ -187,12 +167,6 @@ class BzrDriver extends VcsDriver
 
         if ($exit === 0) {
             // This is definitely a Bazaar repository.
-            return true;
-        }
-
-        if (false !== stripos($processExecutor->getErrorOutput(), 'authorization failed:')) {
-            // This is likely a remote Subversion repository that requires
-            // authentication. We will handle actual authentication later.
             return true;
         }
 

@@ -15,8 +15,7 @@ namespace Composer\Downloader;
 use Composer\Package\PackageInterface;
 
 /**
- * @author Ben Bieker <mail@ben-bieker.de>
- * @author Till Klampaeckel <till@php.net>
+ * @author Jérémy Subtil <jeremy.subtil@gmail.com>
  */
 class BzrDownloader extends VcsDownloader
 {
@@ -25,11 +24,15 @@ class BzrDownloader extends VcsDownloader
      */
     public function doDownload(PackageInterface $package, $path)
     {
-        $url =  $package->getSourceUrl();
-        $ref =  $package->getSourceReference();
+        $ref = $package->getSourceReference();
 
-        $this->io->write("    Checking out ".$package->getSourceReference());
-        $this->execute($url, "bzr checkout --lightweight", sprintf("%s/%s", $url, $ref), null, $path);
+        $command = 'bzr checkout --lightweight';
+        if ($ref !== 'default') {
+            $command .= ' --revision ' . $ref;
+        }
+
+        $this->io->write('    Checking out ' . $ref);
+        $this->execute($command, $package->getSourceUrl(), $path);
     }
 
     /**
@@ -37,11 +40,15 @@ class BzrDownloader extends VcsDownloader
      */
     public function doUpdate(PackageInterface $initial, PackageInterface $target, $path)
     {
-        $url = $target->getSourceUrl();
         $ref = $target->getSourceReference();
 
-        $this->io->write("    Checking out " . $ref);
-        $this->execute($url, "bzr switch", sprintf("%s/%s", $url, $ref), $path);
+        $command = 'bzr switch';
+        if ($ref !== 'default') {
+            $command .= ' --revision ' . $ref;
+        }
+
+        $this->io->write('    Checking out ' . $ref);
+        $this->execute($command, $target->getSourceUrl(), $path);
     }
 
     /**
@@ -53,31 +60,12 @@ class BzrDownloader extends VcsDownloader
             return;
         }
 
-        $this->process->execute('bzr status ', $output, $path);
-
-        return preg_match('{^ *[^X ] +}m', $output) ? $output : null;
-    }
-
-    /**
-     * Execute an Bzr command
-     *
-     * @param string $baseUrl Base URL of the repository
-     * @param string $command BZR command to run
-     * @param string $url     BZR url
-     * @param string $cwd     Working directory
-     * @param string $path    Target for a checkout
-     *
-     * @return string
-     */
-    protected function execute($baseUrl, $command, $url, $cwd = null, $path = null)
-    {
-        try {
-            return $this->process->execute("$command $url $path");
-        } catch (\RuntimeException $e) {
-            throw new \RuntimeException(
-                'Package could not be downloaded, '.$e->getMessage()
-            );
+        $command = 'bzr status --short --versioned';
+        if (0 !== $this->process->execute($command, $output, $path)) {
+            throw new \RuntimeException('Failed to execute ' . $command . "\n\n" . $this->process->getErrorOutput());
         }
+
+        return trim($output) ?: null;
     }
 
     /**
@@ -125,7 +113,6 @@ class BzrDownloader extends VcsDownloader
                         '    y - discard changes and apply the '.($update ? 'update' : 'uninstall'),
                         '    n - abort the '.($update ? 'update' : 'uninstall').' and let you manually clean things up',
                         '    v - view modified files',
-                        '    ? - print help',
                     ));
                     break;
             }
@@ -137,11 +124,7 @@ class BzrDownloader extends VcsDownloader
      */
     protected function getCommitLogs($fromReference, $toReference, $path)
     {
-        // strip paths from references and only keep the actual revision
-        $fromRevision = preg_replace('{.*@(\d+)$}', '$1', $fromReference);
-        $toRevision = preg_replace('{.*@(\d+)$}', '$1', $toReference);
-
-        $command = sprintf('cd %s && bzr log -r%s:%s --incremental', escapeshellarg($path), $fromRevision, $toRevision);
+        $command = sprintf('bzr log --revision %s..%s %s', $fromReference, $toReference, escapeshellarg($path));
 
         if (0 !== $this->process->execute($command, $output)) {
             throw new \RuntimeException('Failed to execute ' . $command . "\n\n" . $this->process->getErrorOutput());
@@ -150,10 +133,31 @@ class BzrDownloader extends VcsDownloader
         return $output;
     }
 
+    /**
+     * Execute an Bzr command
+     *
+     * @param string $command Bzr command to run
+     * @param string $url     Bzr url
+     * @param string $path    Target for a checkout
+     * @return string
+     */
+    protected function execute($command, $url, $path = null)
+    {
+        try {
+            return $this->process->execute("$command $url $path");
+        } catch (\RuntimeException $e) {
+            throw new \RuntimeException(
+                'Package could not be downloaded, '.$e->getMessage()
+            );
+        }
+    }
+
     protected function discardChanges($path)
     {
-        if (0 !== $this->process->execute('bzr revert -R .', $output, $path)) {
-            throw new \RuntimeException("Could not reset changes\n\n:".$this->process->getErrorOutput());
+        $command = sprintf('bzr revert %s', $path);
+
+        if (0 !== $this->process->execute($command, $output)) {
+            throw new \RuntimeException("Could not revert changes\n\n:".$this->process->getErrorOutput());
         }
     }
 }
